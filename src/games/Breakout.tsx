@@ -3,17 +3,61 @@ import { useRef, useEffect, useState } from "react";
 const resoWidth = 1280;
 const resoHeight = 600;
 
-const blockCountPerRow = 10;
-const blockCountPerCol = 4;
+const blockCountPerRow = 4;
+const blockCountPerCol = 8;
 const blockColor = "green";
 const blockGap = 2;
-const blockWidth = Math.floor(resoWidth / blockCountPerRow);
+const blockWidth = Math.floor(resoWidth / blockCountPerCol);
 const blockHeight = 32;
 const ballDims = 20;
+const oneOverSqrt2 = 0.70710678118; // 1 / Math.sqrt(2)
+const ballSpeed = 500; // pixels per second
 
 interface v2f {
   x: number;
   y: number;
+};
+
+interface aabb {
+  min: v2f;
+  max: v2f;
+};
+
+const collisionOccured = (a: aabb, b: aabb): v2f | null => {
+
+  //if ((a.max.x < b.min.x) || (a.min.x > b.max.x)) return false;
+  //if ((a.max.y < b.min.y) || (a.min.y > b.max.y)) return false;
+  //return true;
+  const aCenter = {
+    x: (a.min.x + a.max.x) * 0.5,
+    y: (a.min.y + a.max.y) * 0.5,
+  };
+  const bCenter = {
+    x: (b.min.x + b.max.x) * 0.5,
+    y: (b.min.y + b.max.y) * 0.5,
+  };
+  const dx = aCenter.x - bCenter.x;
+  const dy = aCenter.y - bCenter.y;
+  const absDX = Math.abs(dx);
+  const absDY = Math.abs(dy);
+  // If the distance between the centers of the rects are greater than the sum of their half widths, then they are not colliding
+  // Easy to see if you draw the AABBs on paper.
+  const xOverlap = ((a.max.x - a.min.x) * 0.5 + (b.max.x - b.min.x) * 0.5) - absDX;
+  const yOverlap = ((a.max.y - a.min.y) * 0.5 + (b.max.y - b.min.y) * 0.5) - absDY;
+
+  if (xOverlap <= 0 || yOverlap <= 0) {
+    return null;
+  }
+
+  let dirMultiplier: v2f;
+
+  if (xOverlap < yOverlap) {
+    dirMultiplier = { x: Math.sign(dx), y: 1 };
+  } else {
+    dirMultiplier = { x: 1, y: -Math.sign(dy) };
+  }
+
+  return dirMultiplier;
 };
 
 // YOINK: https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Drawing_shapes
@@ -39,6 +83,8 @@ const Breakout = () => {
 
   const [leftArrowDown, setLeftArrowDown] = useState<boolean>(false);
   const [rightArrowDown, setRightArrowDown] = useState<boolean>(false);
+  const [upArrowDown, setUpArrowDown] = useState<boolean>(false);
+
   const playerP = useRef<v2f>(
     {
       x: Math.floor((resoWidth - blockWidth) * 0.5),
@@ -46,12 +92,7 @@ const Breakout = () => {
     }
   );
 
-  const [playerdP, setPlayerdP] = useState<v2f>(
-    {
-      x: 0,
-      y: 0,
-    }
-  );
+  const [playerdP, setPlayerdP] = useState<v2f>({ x: 0, y: 0 });
 
   const ballP = useRef<v2f>(
     {
@@ -59,6 +100,10 @@ const Breakout = () => {
       y: Math.floor(resoHeight - ballDims - 60),
     }
   );
+
+  const ballDir = useRef<v2f>({ x: oneOverSqrt2, y: -oneOverSqrt2 });
+
+  const gameHasStarted = useRef<boolean>(false);
 
   const gameLoop = (timestamp: DOMHighResTimeStamp) => {
     const canvas = canvasRef.current;
@@ -99,6 +144,10 @@ const Breakout = () => {
         }
       }
 
+      if (upArrowDown) {
+        gameHasStarted.current = true;
+      }
+
       newdPX *= drag;
 
       // TODO: think of a better way for "bounding" on the wall.
@@ -118,10 +167,67 @@ const Breakout = () => {
       setPlayerdP((prev: v2f) => ({ ...prev, x: newdPX }));
       playerP.current.x = playerX;
 
+      if (!gameHasStarted.current) {
+        ballP.current.x = playerX + (blockWidth - ballDims) * 0.5;
+        ballP.current.y = playerP.current.y - ballDims - 10;
+      } else {
+        let newBallX = ballP.current.x + ballDir.current.x * ballSpeed * delta;
+        let newBallY = ballP.current.y + ballDir.current.y * ballSpeed * delta;
+
+        const ballAABB: aabb = {
+          min: { x: newBallX, y: newBallY },
+          max: { x: newBallX + ballDims, y: newBallY + ballDims },
+        };
+
+        let hasHitSomething = false;
+        for (let row = 0; (row < blockCountPerRow) && !hasHitSomething; row++) {
+          for (let col = 0; col < blockCountPerCol; col++) {
+            
+            const x = col * blockWidth + col * blockGap;
+            const y = row * blockHeight + row * blockGap;
+
+            const blockAABB: aabb = {
+              min: { x, y },
+              max: { x: x + blockWidth, y: y + blockHeight }
+            };
+
+            const dirMultiplier = collisionOccured(ballAABB, blockAABB);
+            if (dirMultiplier !== null) {
+              ballDir.current.x *= dirMultiplier.x;
+              ballDir.current.y *= dirMultiplier.y;
+              hasHitSomething = true;
+              break;
+            }
+          }
+        }
+
+        if (!hasHitSomething) {
+          if ((newBallX < 0) || (newBallX + ballDims > resoWidth)) {
+            ballDir.current.x *= -1;
+          }
+        }
+
+        const playerAABB: aabb = {
+          min: { x: playerP.current.x, y: playerP.current.y },
+          max: { x: playerP.current.x + blockWidth, y: playerP.current.y + blockHeight },
+        };
+        const dirMultiplier = collisionOccured(playerAABB, ballAABB);
+        if (dirMultiplier !== null) {
+          ballDir.current.x *= dirMultiplier.x;
+          ballDir.current.y *= dirMultiplier.y;
+        }
+
+        newBallX = ballP.current.x + ballDir.current.x * ballSpeed * delta;
+        newBallY = ballP.current.y + ballDir.current.y * ballSpeed * delta;
+        
+        ballP.current.x = newBallX;
+        ballP.current.y = newBallY;
+      }
+
       if (ctx) {
         ctx.fillStyle = blockColor;
-        for (let row = 0; row < blockCountPerCol; row++) {
-          for (let col = 0; col < blockCountPerRow; col++) {
+        for (let row = 0; row < blockCountPerRow; row++) {
+          for (let col = 0; col < blockCountPerCol; col++) {
             
             ctx.fillRect(col * blockWidth + col * blockGap,
                          row * blockHeight + row * blockGap,
@@ -140,18 +246,34 @@ const Breakout = () => {
 
   useEffect(() => {
     const getKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") {
-        setLeftArrowDown(true);
-      } else if (e.key === "ArrowRight") {
-        setRightArrowDown(true);
+      switch (e.key) {
+        case "ArrowUp": {
+          setUpArrowDown(true);
+        } break;
+
+        case "ArrowLeft": {
+          setLeftArrowDown(true);
+        } break;
+
+        case "ArrowRight": {
+          setRightArrowDown(true);
+        } break;
       }
     };
 
     const getKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") {
-        setLeftArrowDown(false);
-      } else if (e.key === "ArrowRight") {
-        setRightArrowDown(false);
+      switch (e.key) {
+        case "ArrowUp": {
+          setUpArrowDown(false);
+        } break;
+
+        case "ArrowLeft": {
+          setLeftArrowDown(false);
+        } break;
+
+        case "ArrowRight": {
+          setRightArrowDown(false);
+        } break;
       }
     };
     
@@ -166,7 +288,7 @@ const Breakout = () => {
       document.removeEventListener("keydown", getKeyDown);
       window.cancelAnimationFrame(id);
     };
-  }, [rightArrowDown, leftArrowDown, playerdP]);
+  }, [rightArrowDown, leftArrowDown, upArrowDown, playerdP]);
 
   return (
     <div>
