@@ -23,6 +23,8 @@ interface aabb {
   max: v2f;
 };
 
+const Block_IsActive = 0x1;
+
 const collisionOccured = (a: aabb, b: aabb): v2f | null => {
 
   //if ((a.max.x < b.min.x) || (a.min.x > b.max.x)) return false;
@@ -49,15 +51,15 @@ const collisionOccured = (a: aabb, b: aabb): v2f | null => {
     return null;
   }
 
-  let dirMultiplier: v2f;
+  let hitNormal: v2f;
 
   if (xOverlap < yOverlap) {
-    dirMultiplier = { x: Math.sign(dx), y: 1 };
+    hitNormal = { x: Math.sign(dx), y: 0 };
   } else {
-    dirMultiplier = { x: 1, y: -Math.sign(dy) };
+    hitNormal = { x: 0, y: Math.sign(dy) };
   }
 
-  return dirMultiplier;
+  return hitNormal;
 };
 
 // YOINK: https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Drawing_shapes
@@ -102,6 +104,7 @@ const Breakout = () => {
   );
 
   const ballDir = useRef<v2f>({ x: oneOverSqrt2, y: -oneOverSqrt2 });
+  const blockStates = useRef<number[]>(Array(blockCountPerRow * blockCountPerCol).fill(Block_IsActive));
 
   const gameHasStarted = useRef<boolean>(false);
 
@@ -182,21 +185,30 @@ const Breakout = () => {
         let hasHitSomething = false;
         for (let row = 0; (row < blockCountPerRow) && !hasHitSomething; row++) {
           for (let col = 0; col < blockCountPerCol; col++) {
-            
-            const x = col * blockWidth + col * blockGap;
-            const y = row * blockHeight + row * blockGap;
+            const currentIdx = row * blockCountPerCol + col;
+            if ((blockStates.current[currentIdx] & Block_IsActive)) {
+                const x = col * blockWidth + col * blockGap;
+                const y = row * blockHeight + row * blockGap;
+                
+                const blockAABB: aabb = {
+                min: { x, y },
+                max: { x: x + blockWidth, y: y + blockHeight }
+              };
 
-            const blockAABB: aabb = {
-              min: { x, y },
-              max: { x: x + blockWidth, y: y + blockHeight }
-            };
+              const hitNormal = collisionOccured(ballAABB, blockAABB);
+              if (hitNormal !== null) {
+                if (hitNormal.x) {
+                  ballDir.current.x *= -1;
+                }
 
-            const dirMultiplier = collisionOccured(ballAABB, blockAABB);
-            if (dirMultiplier !== null) {
-              ballDir.current.x *= dirMultiplier.x;
-              ballDir.current.y *= dirMultiplier.y;
-              hasHitSomething = true;
-              break;
+                if (hitNormal.y) {
+                  ballDir.current.y *= -1;
+                }
+
+                hasHitSomething = true;
+                blockStates.current[currentIdx] &= ~Block_IsActive;
+                break;
+              }
             }
           }
         }
@@ -205,16 +217,25 @@ const Breakout = () => {
           if ((newBallX < 0) || (newBallX + ballDims > resoWidth)) {
             ballDir.current.x *= -1;
           }
+
+          if (newBallY < 0) {
+            ballDir.current.y *= -1;
+          }
         }
 
         const playerAABB: aabb = {
           min: { x: playerP.current.x, y: playerP.current.y },
           max: { x: playerP.current.x + blockWidth, y: playerP.current.y + blockHeight },
         };
-        const dirMultiplier = collisionOccured(playerAABB, ballAABB);
-        if (dirMultiplier !== null) {
-          ballDir.current.x *= dirMultiplier.x;
-          ballDir.current.y *= dirMultiplier.y;
+        const hitNormal = collisionOccured(playerAABB, ballAABB);
+        if (hitNormal !== null) {
+          if (hitNormal.x) {
+            ballDir.current.x *= -1;
+          }
+
+          if (hitNormal.y) {
+            ballDir.current.y *= -1;
+          }
         }
 
         newBallX = ballP.current.x + ballDir.current.x * ballSpeed * delta;
@@ -228,10 +249,12 @@ const Breakout = () => {
         ctx.fillStyle = blockColor;
         for (let row = 0; row < blockCountPerRow; row++) {
           for (let col = 0; col < blockCountPerCol; col++) {
-            
-            ctx.fillRect(col * blockWidth + col * blockGap,
-                         row * blockHeight + row * blockGap,
-                         blockWidth, blockHeight);
+            const currentIdx = row * blockCountPerCol + col;
+            if (blockStates.current[currentIdx] & Block_IsActive) {
+              ctx.fillRect(col * blockWidth + col * blockGap,
+                           row * blockHeight + row * blockGap,
+                           blockWidth, blockHeight);
+            }
           }
         }
 
