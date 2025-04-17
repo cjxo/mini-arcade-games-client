@@ -2,7 +2,7 @@ import { useRef, useEffect, useState } from "react";
 
 // TODO:
 // [X] Player Lives Display and Logic
-// [ ] Score Display and Logic
+// [X] Score Display and Logic
 // [ ] Special Blocks (e.g. power-ups, power-downs)
 //    - Extra Life
 //    - Triple Balls
@@ -125,7 +125,6 @@ const rectFilled = (ctx: CanvasRenderingContext2D, coordinateSystem: CoordinateS
   ctx.fillRect(x, y, width, height);
 };
 
-// Programming Real-Time stuff in React is a MISTAKE.
 const Breakout = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -150,6 +149,7 @@ const Breakout = () => {
   );
 
   const playerLives = useRef<number>(playerMaxLives);
+  const playerScore = useRef<number>(0);
 
   const [playerdP, setPlayerdP] = useState<v2f>({ x: 0, y: 0 });
 
@@ -239,10 +239,10 @@ const Breakout = () => {
           for (let col = 0; col < blockCountPerCol; col++) {
             const currentIdx = row * blockCountPerCol + col;
             if ((blockStates.current[currentIdx] & Block_IsActive)) {
-                const x = col * blockWidth + col * blockGap;
-                const y = row * blockHeight + row * blockGap;
-                
-                const blockAABB: aabb = {
+              const x = col * blockWidth + col * blockGap;
+              const y = row * blockHeight + row * blockGap;
+              
+              const blockAABB: aabb = {
                 min: { x, y },
                 max: { x: x + blockWidth, y: y + blockHeight }
               };
@@ -259,6 +259,7 @@ const Breakout = () => {
 
                 hasHitSomething = true;
                 blockStates.current[currentIdx] &= ~Block_IsActive;
+                playerScore.current += 10;
                 break;
               }
             }
@@ -289,6 +290,7 @@ const Breakout = () => {
                 y: Math.floor(resoHeight - blockHeight - 10) - worldCoorndinateSystem.origin.y,
               };
               blockStates.current = Array(blockCountPerRow * blockCountPerCol).fill(Block_IsActive);
+              playerScore.current = 0;
               setPlayerdP({ x: 0, y: 0 });
               return;
             }
@@ -350,7 +352,12 @@ const Breakout = () => {
         ctx.textAlign = "center";
         ctx.fillStyle = "black";
         ctx.textBaseline = "hanging";
-        const string = "000000";
+        let string = playerScore.current.toString();
+        if (string.length < 6) {
+          for (let i = string.length; i < 6; ++i) {
+            string = "0" + string;
+          }
+        }
         const metrics = ctx.measureText(string);
         ctx.fillText(string, (resoWidth * 0.5), (UIAreaSize - metrics.fontBoundingBoxDescent + metrics.fontBoundingBoxAscent) * 0.5);
       }
