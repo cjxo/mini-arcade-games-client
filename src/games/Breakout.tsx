@@ -1,5 +1,14 @@
 import { useRef, useEffect, useState } from "react";
 
+// TODO:
+// [X] Player Lives Display and Logic
+// [ ] Score Display and Logic
+// [ ] Special Blocks (e.g. power-ups, power-downs)
+//    - Extra Life
+//    - Triple Balls
+//    - Minus Life
+// [ ] Game Over Logic
+
 const resoWidth = 1280;
 const resoHeight = 600;
 
@@ -12,6 +21,8 @@ const blockHeight = 32;
 const ballDims = 20;
 const oneOverSqrt2 = 0.70710678118; // 1 / Math.sqrt(2)
 const ballSpeed = 500; // pixels per second
+const playerMaxLives = 3;
+const UIAreaSize = 70; // pixels
 
 interface v2f {
   x: number;
@@ -22,6 +33,13 @@ interface aabb {
   min: v2f;
   max: v2f;
 };
+
+interface CoordinateSystem {
+  origin: v2f;
+
+  // xBasis: v2f;
+  // yBasis: v2f;
+}
 
 const Block_IsActive = 0x1;
 
@@ -63,12 +81,16 @@ const collisionOccured = (a: aabb, b: aabb): v2f | null => {
 };
 
 // YOINK: https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Drawing_shapes
-const roundedRect =
+const roundedRectFilled =
   (ctx: CanvasRenderingContext2D,
-   { x, y }: v2f,
+   coordinateSystem: CoordinateSystem,
+   p: v2f,
    width: number,
    height: number,
    radius: number) => {
+
+  const x = p.x + coordinateSystem.origin.x;
+  const y = p.y + coordinateSystem.origin.y;
   ctx.beginPath();
   ctx.moveTo(x, y + radius);
   ctx.arcTo(x, y + height, x + radius, y + height, radius);
@@ -76,7 +98,32 @@ const roundedRect =
   ctx.arcTo(x + width, y, x + width - radius, y, radius);
   ctx.arcTo(x, y, x, y + radius, radius);
   ctx.fill();
-}
+};
+
+const roundedRectWire =
+  (ctx: CanvasRenderingContext2D,
+   coordinateSystem: CoordinateSystem,
+   p: v2f,
+   width: number,
+   height: number,
+   radius: number) => {
+
+  const x = p.x + coordinateSystem.origin.x;
+  const y = p.y + coordinateSystem.origin.y;
+  ctx.beginPath();
+  ctx.moveTo(x, y + radius);
+  ctx.arcTo(x, y + height, x + radius, y + height, radius);
+  ctx.arcTo(x + width, y + height, x + width, y + height - radius, radius);
+  ctx.arcTo(x + width, y, x + width - radius, y, radius);
+  ctx.arcTo(x, y, x, y + radius, radius);
+  ctx.stroke();
+};
+
+const rectFilled = (ctx: CanvasRenderingContext2D, coordinateSystem: CoordinateSystem, p: v2f, width: number, height: number) => {
+  const x = p.x + coordinateSystem.origin.x;
+  const y = p.y + coordinateSystem.origin.y;
+  ctx.fillRect(x, y, width, height);
+};
 
 // Programming Real-Time stuff in React is a MISTAKE.
 const Breakout = () => {
@@ -86,22 +133,27 @@ const Breakout = () => {
   const [leftArrowDown, setLeftArrowDown] = useState<boolean>(false);
   const [rightArrowDown, setRightArrowDown] = useState<boolean>(false);
   const [upArrowDown, setUpArrowDown] = useState<boolean>(false);
+  
+  const worldCoorndinateSystem: CoordinateSystem = {
+    origin: { x: 0, y: UIAreaSize },
+  };
+
+  const screenCoorndinateSystem: CoordinateSystem = {
+    origin: { x: 0, y: 0 },
+  };
 
   const playerP = useRef<v2f>(
     {
       x: Math.floor((resoWidth - blockWidth) * 0.5),
-      y: Math.floor(resoHeight - blockHeight - 10),
+      y: Math.floor(resoHeight - blockHeight - 10) - worldCoorndinateSystem.origin.y,
     }
   );
+
+  const playerLives = useRef<number>(playerMaxLives);
 
   const [playerdP, setPlayerdP] = useState<v2f>({ x: 0, y: 0 });
 
-  const ballP = useRef<v2f>(
-    {
-      x: Math.floor((resoWidth - ballDims) * 0.5),
-      y: Math.floor(resoHeight - ballDims - 60),
-    }
-  );
+  const ballP = useRef<v2f>({ x: 0, y: 0 });
 
   const ballDir = useRef<v2f>({ x: oneOverSqrt2, y: -oneOverSqrt2 });
   const blockStates = useRef<number[]>(Array(blockCountPerRow * blockCountPerCol).fill(Block_IsActive));
@@ -221,6 +273,26 @@ const Breakout = () => {
           if (newBallY < 0) {
             ballDir.current.y *= -1;
           }
+
+          if ((newBallY + ballDims) > resoHeight) {
+            playerLives.current -= 1;
+            ballP.current = { x: 0, y: 0 };
+            gameHasStarted.current = false;
+            if (playerLives.current <= 0) {
+              // TODO: Game Over Logic
+              alert("Game Over!");
+              playerLives.current = playerMaxLives;
+              gameHasStarted.current = false;
+              ballP.current = { x: 0, y: 0 };
+              playerP.current = {
+                x: Math.floor((resoWidth - blockWidth) * 0.5),
+                y: Math.floor(resoHeight - blockHeight - 10) - worldCoorndinateSystem.origin.y,
+              };
+              blockStates.current = Array(blockCountPerRow * blockCountPerCol).fill(Block_IsActive);
+              setPlayerdP({ x: 0, y: 0 });
+              return;
+            }
+          }
         }
 
         const playerAABB: aabb = {
@@ -251,18 +323,36 @@ const Breakout = () => {
           for (let col = 0; col < blockCountPerCol; col++) {
             const currentIdx = row * blockCountPerCol + col;
             if (blockStates.current[currentIdx] & Block_IsActive) {
-              ctx.fillRect(col * blockWidth + col * blockGap,
-                           row * blockHeight + row * blockGap,
-                           blockWidth, blockHeight);
+              rectFilled(ctx, worldCoorndinateSystem,
+                           { x: col * blockWidth + col * blockGap, y: row * blockHeight + row * blockGap },
+                            blockWidth, blockHeight);
             }
           }
         }
 
         ctx.fillStyle = "red";
-        ctx.fillRect(playerP.current.x, playerP.current.y, blockWidth, blockHeight)
+        rectFilled(ctx, worldCoorndinateSystem, playerP.current, blockWidth, blockHeight);
 
         ctx.fillStyle = "blue";
-        roundedRect(ctx, ballP.current, ballDims, ballDims, ballDims * 0.5);
+        roundedRectFilled(ctx, worldCoorndinateSystem, ballP.current, ballDims, ballDims, ballDims * 0.5);
+        
+        const gap = ballDims * 1.5;
+        let lifeIndex = 0;
+        for (lifeIndex = 0; lifeIndex < playerLives.current; ++lifeIndex) {
+          roundedRectFilled(ctx, screenCoorndinateSystem, { x: lifeIndex * gap, y: (UIAreaSize - ballDims) * 0.5 }, ballDims, ballDims, ballDims * 0.5);
+        }
+
+        for (; lifeIndex < playerMaxLives; ++lifeIndex) {
+          roundedRectWire(ctx, screenCoorndinateSystem, { x: lifeIndex * gap, y: (UIAreaSize - ballDims) * 0.5 }, ballDims, ballDims, ballDims * 0.5);
+        }
+
+        ctx.font = "20px Arial";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "black";
+        ctx.textBaseline = "hanging";
+        const string = "000000";
+        const metrics = ctx.measureText(string);
+        ctx.fillText(string, (resoWidth * 0.5), (UIAreaSize - metrics.fontBoundingBoxDescent + metrics.fontBoundingBoxAscent) * 0.5);
       }
     }
   };
